@@ -28,7 +28,6 @@ jobs:
     with:
       stage: database
       operation: destroy
-      require_approval: false
     secrets:
       DATABASE_ACTION_ROLE: ${{ secrets.DATABASE_ACTION_ROLE }}
       db_username: ${{ secrets.db_username }}
