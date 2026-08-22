@@ -1,0 +1,36 @@
+name: Destroy Database
+
+on:
+  workflow_call:
+    secrets:
+      DATABASE_ACTION_ROLE:
+        required: true
+      db_username:
+        required: true
+      db_password:
+        required: true
+      REPOSITORIES_TOKEN:
+        required: false
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: database-production
+  cancel-in-progress: false
+
+jobs:
+  database:
+    name: Destroy Database Resources
+    uses: ./.github/workflows/terraform-stage.yml
+    with:
+      stage: database
+      operation: destroy
+      require_approval: false
+    secrets:
+      DATABASE_ACTION_ROLE: ${{ secrets.DATABASE_ACTION_ROLE }}
+      db_username: ${{ secrets.db_username }}
+      db_password: ${{ secrets.db_password }}
+      REPOSITORIES_TOKEN: ${{ secrets.REPOSITORIES_TOKEN }}
