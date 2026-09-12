@@ -46,7 +46,7 @@ Este repositório contém sua própria action reutilizável `terraform-stage.yml
 - `apply-database.yml`, para planejar e aplicar automaticamente a criação ou atualização do banco;
 - `destroy-database.yml`, para planejar e destruir o banco sem aprovação manual adicional.
 
-Ambos podem ser chamados pelo orquestrador do repositório da aplicação ou iniciados manualmente neste repositório. Configure `DATABASE_ACTION_ROLE`, `db_username` e `db_password` nos repositórios que iniciarem os fluxos. O ARN da role é o output `github_actions_infra_role_arn["database_infra"]` do bootstrap.
+Ambos aplicam o plano salvo automaticamente, sem etapa de aprovação humana declarada no workflow. Podem ser chamados pelo orquestrador do repositório da aplicação ou iniciados manualmente neste repositório. Configure `DATABASE_ACTION_ROLE`, `db_username` e `db_password` nos repositórios que iniciarem os fluxos. O ARN da role é o output `github_actions_infra_role_arn["database_infra"]` do bootstrap.
 
 Para repositórios privados, configure também `REPOSITORIES_TOKEN` com acesso de leitura. As configurações do GitHub Actions devem permitir que os workflows reutilizáveis sejam acessados pelo repositório da aplicação.
 
