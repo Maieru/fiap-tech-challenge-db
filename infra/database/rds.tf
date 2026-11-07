@@ -3,7 +3,7 @@ resource "aws_security_group" "database" {
   vpc_id = data.terraform_remote_state.aws-resources.outputs.vpc.id
 }
 resource "aws_vpc_security_group_ingress_rule" "database" {
-  for_each                     = { postgresql = 5432, documentdb = 27017 }
+  for_each                     = { postgresql = 5432 }
   security_group_id            = aws_security_group.database.id
   referenced_security_group_id = data.terraform_remote_state.aws-resources.outputs.eks.node_security_group
   from_port                    = each.value
@@ -30,28 +30,4 @@ resource "aws_db_instance" "postgresql" {
   delete_automated_backups = true
   deletion_protection      = false
   apply_immediately        = true
-}
-resource "aws_docdb_subnet_group" "execution" {
-  name       = "fiap-execution"
-  subnet_ids = data.terraform_remote_state.aws-resources.outputs.vpc.database_subnet_ids
-}
-resource "aws_docdb_cluster" "execution" {
-  cluster_identifier      = "fiap-execution"
-  engine                  = "docdb"
-  engine_version          = "5.0.0"
-  master_username         = "fiap_admin"
-  master_password         = random_password.database["documentdb_admin"].result
-  db_subnet_group_name    = aws_docdb_subnet_group.execution.name
-  vpc_security_group_ids  = [aws_security_group.database.id]
-  storage_encrypted       = true
-  backup_retention_period = 1
-  skip_final_snapshot     = true
-  deletion_protection     = false
-  apply_immediately       = true
-}
-resource "aws_docdb_cluster_instance" "execution" {
-  identifier         = "fiap-execution-1"
-  cluster_identifier = aws_docdb_cluster.execution.id
-  instance_class     = "db.t4g.medium"
-  apply_immediately  = true
 }
