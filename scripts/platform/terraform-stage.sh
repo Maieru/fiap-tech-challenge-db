@@ -29,8 +29,6 @@ else
   elif [[ "$STAGE" == database ]]; then
     count=$(aws rds describe-orderable-db-instance-options --engine postgres --engine-version 18.3 --db-instance-class db.t4g.micro --query 'length(OrderableDBInstanceOptions)' --output text)
     [[ "$count" -gt 0 ]] || { echo 'PostgreSQL 18.3/db.t4g.micro indisponivel.' >&2; exit 1; }
-    count=$(aws docdb describe-orderable-db-instance-options --engine docdb --engine-version 5.0.0 --db-instance-class db.t4g.medium --query 'length(OrderableDBInstanceOptions)' --output text)
-    [[ "$count" -gt 0 ]] || { echo 'DocumentDB 5.0/db.t4g.medium indisponivel.' >&2; exit 1; }
   elif [[ "$STAGE" == kubernetes-addons ]]; then
     [[ -n "$TF_VAR_new_relic_license_key" ]] || { echo 'Configure NEW_RELIC_LICENSE_KEY.' >&2; exit 1; }
   fi
