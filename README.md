@@ -1,80 +1,22 @@
-# FIAP Tech Challenge — Database
+# Bancos gerenciados dos microsserviços
 
-Este repositório contém exclusivamente a infraestrutura Terraform do banco de dados do projeto.
+Este repositório provisiona RDS PostgreSQL e DocumentDB privados/criptografados em us-east-1, e automatiza usuários/grants e compatibilidade pelo EKS.
 
-## Recursos
+- RDS PostgreSQL 18.3, db.t4g.micro, 20 GiB gp3, Single-AZ: fiap_os e fiap_billing, com usuários exclusivos.
+- DocumentDB 5.0, db.t4g.medium: fiap_execution; autenticação em admin e readWrite restrito ao banco.
+- Secrets Manager: fiap-{os,billing,execution}-database-credentials, fiap-postgres-admin e fiap-documentdb-admin. Senhas são aleatórias; não configurar db_username/db_password no GitHub.
+- Portas de banco aceitam somente os nós EKS. Jobs executam na VPC; o runner GitHub não conecta diretamente aos bancos.
 
-- instância PostgreSQL no Amazon RDS;
-- security group para acesso a partir dos nós do EKS;
-- credenciais da aplicação no AWS Secrets Manager.
+A chave do state continua terraform/database/terraform.tfstate. A transição exige esvaziar o estado legado com seu código antigo antes de aplicar esta topologia; não há migração de dados.
 
-Os arquivos ficam em [`infra/database`](infra/database). O estado remoto continua usando a chave `terraform/database/terraform.tfstate`, portanto a mudança de repositório não exige migração do state.
+## Entrega
 
-## Dependência
+Os workflows terraform-stage.yml e initialize-databases.yml são chamados exclusivamente pelo orquestrador manage-platform.yml do repositório principal. O primeiro recebe stage, operation, source_sha e role_arn. O segundo recebe source_sha, role_arn e execution_image por digest. OIDC usa o principal em main; REPOSITORIES_TOKEN é necessário para fontes privadas.
 
-Este estado lê os outputs de `aws-resources`, mantido no repositório `fiap-tech-challenge-infra`. Na primeira implantação, respeite a ordem:
+Inicialização cria/atualiza usuários e grants idempotentemente. Testa acesso ao próprio PostgreSQL e rejeição cruzada. O Job de compatibilidade executa --verify-persistence da imagem Execution em banco temporário, com TLS/CA, índice único parcial, commit, abort, conflito de escrita e deduplicação. Se falhar, a entrega para antes do rollout. As migrations EF pertencem a OS/Billing e são executadas pelos respectivos Jobs de entrega.
 
-```text
-infra/bootstrap → infra/aws-resources → database → infra/kubernetes-addons → infra/kubernetes-configs
-```
+## Destruição e validação
 
-## Uso
+RDS usa backup_retention_period=0 e ambos os bancos usam skip_final_snapshot=true. DocumentDB retém backups automaticamente pelo mínimo de um dia enquanto ativo. Destroy apaga os dados. O estado remoto versionado, incluindo credenciais antigas, permanece sensível no bootstrap preservado.
 
-Crie `infra/database/terraform.tfvars` sem versioná-lo:
-
-```hcl
-db_username = "usuario_do_banco"
-db_password = "uma_senha_forte"
-```
-
-Depois execute:
-
-```powershell
-terraform -chdir=infra/database init
-terraform -chdir=infra/database fmt -check
-terraform -chdir=infra/database validate
-terraform -chdir=infra/database plan -out=.terraform/tfplan
-terraform -chdir=infra/database apply .terraform/tfplan
-```
-
-O RDS está configurado com `skip_final_snapshot = true`; revise qualquer plano de destruição com atenção.
-
-## GitHub Actions
-
-Este repositório contém sua própria action reutilizável `terraform-stage.yml` e dois workflows de alto nível:
-
-- `apply-database.yml`, para planejar e aplicar automaticamente a criação ou atualização do banco;
-- `destroy-database.yml`, para planejar e destruir o banco sem aprovação manual adicional.
-
-Ambos aplicam o plano salvo automaticamente, sem etapa de aprovação humana declarada no workflow. Podem ser chamados pelo orquestrador do repositório da aplicação ou iniciados manualmente neste repositório. Configure `DATABASE_ACTION_ROLE`, `db_username` e `db_password` nos repositórios que iniciarem os fluxos. O ARN da role é o output `github_actions_infra_role_arn["database_infra"]` do bootstrap.
-
-Para repositórios privados, configure também `REPOSITORIES_TOKEN` com acesso de leitura. As configurações do GitHub Actions devem permitir que os workflows reutilizáveis sejam acessados pelo repositório da aplicação.
-
-
-## Tecnologias e arquitetura
-
-Terraform, Amazon RDS PostgreSQL, Secrets Manager e GitHub Actions/OIDC. Não há aplicação executável ou Dockerfile neste repositório.
-
-```mermaid
-flowchart LR
-    Actions["GitHub Actions / OIDC"] --> TF["Terraform database"]
-    State["Outputs de aws-resources"] --> TF
-    TF --> RDS[("RDS PostgreSQL")]
-    TF --> Secret["Secrets Manager"]
-    API["API no EKS"] -->|"5432"| RDS
-    Lambda["Lambda Authorizer"] -->|"5432; regra no estado serverless"| RDS
-    Secret --> API
-    Secret --> Lambda
-```
-
-O estágio serverless, no repositório de infraestrutura, adiciona o acesso da Lambda ao security group do banco. A conexão é compartilhada, mas cada aplicação usa seu próprio contexto EF.
-
-## Modelo e contrato da aplicação
-
-O schema e as migrations pertencem à aplicação principal. Consulte o [diagrama ER, relacionamentos e justificativa dos ajustes](https://github.com/Maieru/fiap-tech-challenge/blob/main/docs/arquitetura/banco-de-dados.md) e a [RFC de escolha do PostgreSQL/RDS](https://github.com/Maieru/fiap-tech-challenge/blob/main/docs/RFCs/RFC-002-postgresql-no-amazon-rds.md).
-
-O banco não expõe Swagger/Postman próprio. Seu consumidor possui [OpenAPI local](http://localhost:8080/openapi/v1.json) e [Scalar local](http://localhost:8080/scalar/v1), disponíveis com a API em Development. Para desenvolvimento sem AWS, use o [Compose da aplicação](https://github.com/Maieru/fiap-tech-challenge#execução-local-com-docker-compose).
-
-## Limites da Fase 3
-
-O deploy atual é iniciado manualmente ou pelo orquestrador. Gatilhos de homologação/produção não estão declarados; proteção de branches depende de verificação remota. O RDS não tem backups automáticos e a destruição não cria snapshot final. Consulte os [limites operacionais do banco](https://github.com/Maieru/fiap-tech-challenge/blob/main/docs/arquitetura/banco-de-dados.md#operação).
+Verificar terraform fmt -check, init -backend=false e validate com TF_DATA_DIR isolado. A validação real acontece após publicação/bootstrap, pelo ciclo central. Consulte o [guia operacional](https://github.com/Maieru/fiap-tech-challenge/blob/main/docs/operacao/plataforma-aws.md).
