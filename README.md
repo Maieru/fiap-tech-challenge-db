@@ -23,6 +23,8 @@ Os workflows terraform-stage.yml e initialize-databases.yml são chamados exclus
 
 Inicialização cria/atualiza usuários e grants idempotentemente. Testa acesso ao próprio PostgreSQL e rejeição cruzada. O Job de compatibilidade executa --verify-persistence da imagem Execution em banco temporário, com TLS/CA, índice único parcial, commit, abort, conflito de escrita e deduplicação. Se falhar, a entrega para antes do rollout. As migrations EF pertencem a OS/Billing e são executadas pelos respectivos Jobs de entrega.
 
+As chaves lógicas dos outputs Terraform continuam `postgres_admin`/`mongodb_admin`. No Kubernetes, os ExternalSecrets e Secrets se chamam `database-postgres-admin`/`database-mongodb-admin`: nomes DNS não aceitam underscore. `bootstrap-secrets.mjs` aplica essa normalização às referências dos Jobs e à espera de sincronização. O workflow de inicialização executa os testes de nomes antes de autenticar na AWS.
+
 ## Destruição e validação
 
 RDS usa backup_retention_period=0 e skip_final_snapshot=true. MongoDB usa PVC com retenção Delete ao excluir o StatefulSet, e o estágio messaging aguarda a exclusão do EBS antes de retirar o driver. Destroy apaga os dados. O estado remoto versionado, incluindo credenciais antigas e chaves privadas, permanece sensível no bootstrap preservado.
