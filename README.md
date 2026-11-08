@@ -29,4 +29,8 @@ As chaves lógicas dos outputs Terraform continuam `postgres_admin`/`mongodb_adm
 
 RDS usa backup_retention_period=0 e skip_final_snapshot=true. MongoDB usa PVC com retenção Delete ao excluir o StatefulSet, e o estágio messaging aguarda a exclusão do EBS antes de retirar o driver. Destroy apaga os dados. O estado remoto versionado, incluindo credenciais antigas e chaves privadas, permanece sensível no bootstrap preservado.
 
+O Manage AWS central executa `destroy_database` depois de messaging e antes de configurações/add-ons/core. Excluir o RDS remove os bancos `fiap_os` e `fiap_billing`; excluir o volume MongoDB remove `fiap_execution`. Ao fim do estágio database (também se o state estiver vazio), `verify-databases-deleted.mjs` exige ausência de instâncias/clusters RDS/DocumentDB `fiap-*` e EBS com tags `Project=fiap-tech-challenge`, `Component=mongodb`/`kafka`. Qualquer remanescente ou falha de inventário bloqueia a sequência. Não apaga recursos encontrados fora do state por varredura; é necessário corrigir a gestão dos recursos e retomar o destroy.
+
+O CI executa `node --test scripts/platform/*.test.mjs`, incluindo os casos de bancos/volumes remanescentes e erro de permissão. Os testes usam inventário simulado; não excluem bancos AWS. Publicar DB e Infra antes do principal para ativar a sequência atualizada.
+
 Verificar terraform fmt -check, init -backend=false e validate com TF_DATA_DIR isolado. A validação real acontece após publicação/bootstrap, pelo ciclo central. Consulte o [guia operacional](https://github.com/Maieru/fiap-tech-challenge/blob/main/docs/operacao/plataforma-aws.md).
