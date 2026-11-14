@@ -7,15 +7,19 @@ Este repositório provisiona RDS PostgreSQL e os segredos/certificados do MongoD
 - Secrets Manager: fiap-{os,billing,execution}-database-credentials, fiap-postgres-admin e fiap-mongodb-admin. Senhas/keyfile e certificados são gerados pelo Terraform; não configurar db_username/db_password no GitHub. Somente o namespace MongoDB e os Jobs administrativos recebem o segredo administrativo.
 - RDS aceita somente os nós EKS; MongoDB tem Service interno e NetworkPolicy para Execution/Jobs. O runner GitHub não conecta diretamente aos bancos.
 
-A chave do state continua terraform/database/terraform.tfstate. A transição exige esvaziar o estado legado com seu código antigo antes de aplicar esta topologia; não há migração de dados.
+A chave do state continua terraform/database/terraform.tfstate. Antes de aplicar, verificar se o estado está vazio ou compatível com esta topologia. Estados incompatíveis exigem conciliação dos recursos e revisão do plano; não há migração automática de dados.
 
-## Entrega
+## Pré-requisitos e estrutura
 
-### Substituição do DocumentDB
+- Terraform 1.13.0 é a versão fixada no CI; providers estão fixados em `infra/database/.terraform.lock.hcl`.
+- Os exemplos usam PowerShell 7; Node.js 22+ para scripts/testes; Bash para os scripts `.sh`. Docker é necessário apenas no ensaio MongoDB do repositório Infra.
+- Aplicação remota exige bootstrap/estados de Infra e permissões OIDC configurados no principal. O bootstrap não faz parte do ciclo cotidiano.
 
-A conta recusou DocumentDB com `FreeTierRestrictionError`; o usuário escolheu MongoDB no EKS. Não há criação de DocumentDB nem exigência de upgrade por esse componente. A cobrança/elegibilidade dos demais recursos continua sujeita ao plano e aos créditos da conta.
+`infra/database` declara RDS, security group, segredos e TLS; `scripts/platform` contém inicialização e inventário; `.github/workflows` contém validação e workflows reutilizáveis. O backend S3 e sua chave estão em [backend.tf](infra/database/backend.tf).
 
-Publicar Infra, DB e Execution de forma coordenada, e reaplicar o bootstrap administrativo para permitir à role Database gerenciar `fiap-mongodb-admin`. Depois publicar o principal e iniciar um novo `apply` central. O estágio database cria credenciais/CA antes de kubernetes-configs; messaging cria MongoDB/Kafka; initialize-databases aguarda os segredos e inicializa o usuário da API. Preservar o state: recursos DocumentDB e o segredo antigo eventualmente existentes serão removidos pelo plano. O inventário e as permissões do segredo antigo permanecem para essa limpeza; não há migração de dados.
+## Entrega e inicialização
+
+Publicar Infra, DB e Execution de forma coordenada, e reaplicar o bootstrap administrativo para permitir à role Database gerenciar `fiap-mongodb-admin`. Depois publicar o principal e iniciar um novo `apply` central. O estágio database cria credenciais/CA antes de kubernetes-configs; messaging cria MongoDB/Kafka; initialize-databases aguarda os segredos e inicializa o usuário da API. Preserve o state e revise exclusões no plano antes de aplicar; não há importação automática de dados. O inventário também detecta recursos de banco fora da topologia declarada.
 
 O segredo MongoDB usa o DNS estável `mongodb-0.mongodb.fiap-mongodb.svc.cluster.local`, replicaSet=rs0, TLS, retryWrites=true e pool máximo de 10. O servidor autentica membros por keyfile e clientes por usuário/senha. A CA pública é distribuída separadamente; chaves privadas ficam no Secrets Manager/state. O certificado do servidor vale um ano; após renovação/rotação do segredo, reiniciar o StatefulSet para copiar os arquivos novos. Não rotacionar a senha administrativa somente no Secrets Manager sem alterar também o usuário no banco existente.
 
@@ -33,4 +37,38 @@ O Manage AWS central executa `destroy_database` depois de messaging/configuraç�
 
 O CI executa `node --test scripts/platform/*.test.mjs`, incluindo os casos de bancos/volumes remanescentes e erro de permissão. Os testes usam inventário simulado; não excluem bancos AWS. Publicar DB e Infra antes do principal para ativar a sequência atualizada.
 
-Verificar terraform fmt -check, init -backend=false e validate com TF_DATA_DIR isolado. A validação real acontece após publicação/bootstrap, pelo ciclo central. Consulte o [guia operacional](https://github.com/Maieru/fiap-tech-challenge/blob/main/docs/operacao/plataforma-aws.md).
+## Validação local
+
+Na raiz, os testes usam inventário simulado e não excluem recursos AWS:
+
+```powershell
+node --test scripts/platform/*.test.mjs
+```
+
+Para validar o módulo sem inicializar o backend AWS, use dados locais separados do diretório operacional. init precisa de internet para baixar providers:
+
+```powershell
+$previousTfDataDir = $env:TF_DATA_DIR
+try {
+    $env:TF_DATA_DIR = Join-Path ([IO.Path]::GetTempPath()) ('fiap-db-validate-' + [Guid]::NewGuid().ToString('N'))
+    terraform -chdir=infra/database fmt -check
+    if ($LASTEXITCODE -ne 0) { throw "terraform fmt falhou" }
+    terraform -chdir=infra/database init -backend=false -input=false
+    if ($LASTEXITCODE -ne 0) { throw "terraform init falhou" }
+    terraform -chdir=infra/database validate -no-color
+    if ($LASTEXITCODE -ne 0) { throw "terraform validate falhou" }
+} finally {
+    $env:TF_DATA_DIR = $previousTfDataDir
+}
+```
+
+Os outputs incluem database_secret_arns, database_endpoints, mongodb_ca_pem e database_security_group_id; consumidores usam esses outputs para suas configurações. validate e testes simulados não comprovam IAM, TLS remoto ou grants no banco: a inicialização central e o gate de persistência fazem essa verificação no ambiente implantado.
+
+## Diagnóstico
+
+- ExternalSecret pendente: confira SecretStore, Pod Identity e acesso ao ARN exato, sem imprimir o conteúdo do segredo.
+- Gate MongoDB falhou: confira CA/hostname, replica set primário, usuário e permissões; o rollout deve permanecer bloqueado.
+- Senha alterada apenas no Secrets Manager: sincronize o usuário no banco e reinicie os consumidores quando aplicável; trocar o segredo isoladamente não muda a senha do banco.
+- Destroy bloqueado: investigue o inventário de RDS/DocumentDB/EBS e os recursos no state; não ignore a falha ou remova entradas para escondê-la.
+
+Consulte o [guia operacional](https://github.com/Maieru/fiap-tech-challenge/blob/main/docs/operacao/plataforma-aws.md) para bootstrap, ativação, variáveis e ordem completa de criação/destruição.
